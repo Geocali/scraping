@@ -12,6 +12,7 @@ import pandas as pd
 import time
 import numpy as np
 import datetime
+import sqlite3
 
 # =============== on récupère tous les résumés de toutes les annonces
 def toutes_annonces(mot_cle):
@@ -80,6 +81,8 @@ def toutes_annonces(mot_cle):
                 page = page + 1
         except:
             ok1 = False
+            print(sys.exc_info()[0])
+        print(ok1, page_existe)
 
     df_resumes = pd.concat(results)
     df_resumes = df_resumes.set_index('id', drop=False)
@@ -90,97 +93,8 @@ def toutes_annonces(mot_cle):
 
 
 # ================ pour une page, enregistrer la surface et la description
+
 def infos_annonce(url_request):
-    #url_request = 'file:///C:/data_cv/prog/caves/cave_detail.htm' # !!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    #url_request = 'file:///cave_detail.htm' # !!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    htmlparser = etree.HTMLParser()
-    page_ads = urlopen(url_request)
-    tree_ads = etree.parse(page_ads, htmlparser)
-    ad_title = tree_ads.xpath("/html/body/section[1]/main/section/section/section/header/h1")[0].text
-
-    # on récupère la surface
-    try:
-        k = 2
-        _type = "aucun"
-        non_cave = False
-        while (str(_type) != "Surface" and k <15):
-            xpath_type = "/html/body/section[1]/main/section/section/section/section/section[2]/div[" + str(k) + "]/h2/span[1]"
-            try:
-                _type = tree_ads.xpath(xpath_type)[0].text
-                option = 1
-            except:
-                _type = "aucun"
-
-            # on essaie de récupérer le nombre de pièces
-            pieces = 0
-            if(str(_type) == 'Pièces'):
-                pieces = int(tree_ads.xpath("/html/body/section[1]/main/section/section/section/section/section[2]/div[" + str(k) + "]/h2/span[2]")[0].text)
-            if(pieces > 1):
-                non_cave = True
-
-            if(str(_type) != "Surface" and non_cave == False):
-                xpath_type = "/html/body/section[1]/main/section/section/section/section/section/div[" + str(k) + "]/h2/span[1]"
-                try:
-                    _type = tree_ads.xpath(xpath_type)[0].text
-                    option = 2
-                except:
-                    _type = "aucun"
-
-            # on essaie de récupérer le nombre de pièces
-            if(str(_type) == 'Pièces'):
-                pieces = int(tree_ads.xpath("/html/body/section[1]/main/section/section/section/section/section/div[" + str(k) + "]/h2/span[2]")[0].text)
-            if(pieces > 1):
-                non_cave = True
-
-            print('pieces ', str(pieces))
-
-            # on cherche des mots clés pour voir s'il s'agit d'un appartement
-            keywords = ['Appart', 'appart', 'studio', 'Studio', 'meublé']
-            for keyword in keywords:
-                if ad_title.find(keyword) != -1:
-                    non_cave = True
-
-            print("type : " + _type + ", non_cave : " + str(non_cave))
-            if(str(_type) == "Surface" and non_cave == False):
-                if (option == 1):
-                    xpath = "/html/body/section[1]/main/section/section/section/section/section[2]/div[" + str(k) + "]/h2/span[2]"
-                else:
-                    xpath = "/html/body/section[1]/main/section/section/section/section/section/div[" + str(k) + "]/h2/span[2]"
-                ad_surface = tree_ads.xpath(xpath)[0].text.split(" ")[0]
-            else:
-                ad_surface = np.nan
-            k = k + 1
-        if (_type != "Surface"):
-            ad_surface = np.nan
-        #ad_description = tree_ads.xpath("//*[@id=\"adview\"]/section/section/section/div[12]/p[2]")[0].text
-    except:
-        ad_surface = np.nan
-
-
-    # on récupère la description
-    ok = True
-    ad_description = ""
-    i = 1
-    while (ok):
-        try:
-            xpath1 = "//*[@id=\"adview\"]/section/section/section/div[12]/p[2]/text()[" + str(i) + "]"
-            tmp = tree_ads.xpath(xpath1)[0].replace("\\n", "")
-            ad_description = ad_description + "<br>" + tmp
-            i = i + 1
-            time.sleep(1)
-        except:
-            ok = False
-            print("pb3")
-    ad_description = ad_description[4:]
-
-    # on récupère la date de création de l'annonce
-    xpath = "//*[@id=\"adview\"]/section/section/section/p"
-    ad_creation = tree_ads.xpath(xpath)[0].values()[2]
-
-    print("surface : " + str(ad_surface))
-    return ad_surface, ad_description, ad_creation
-
-def infos_annonce2(url_request):
     htmlparser = etree.HTMLParser()
     page_ads = urlopen(url_request)
     tree_ads = etree.parse(page_ads, htmlparser)
@@ -264,43 +178,59 @@ def infos_annonce2(url_request):
     return ad_surface, ad_description, ad_creation
                     
 
-df_details = pd.read_csv('details_caves.csv', sep=";", encoding='latin1')
+#df_details = pd.read_csv('details_caves.csv', sep=";", encoding='latin1')
+conn = sqlite3.connect('caves.db')
+query = "SELECT * FROM caves ORDER BY date_creation"
+df_details = pd.read_sql_query(query,conn, parse_dates=['date_creation', 'date_suppression'])
 
 # ============= Pour toutes les annonces dont on n'a pas le détail, on va les enregistrer
 # on fait la liste des id qu'on a déjà :
 ids = df_details['id'].tolist()
 
-# on filtre sur les annonces
-# - qu'on vient de récupérer
-# - dont on n'a pas le détail
-
+# on récupère toutes les annonces présentes sur le site leboncoin.fr
 df_resumes = toutes_annonces("cave")
+
+# on enregistre les informations de mesure dans la table "mesures" de la base de données
+df_mesures = df_resumes[['url', 'id']]
+t = str(datetime.datetime.now())
+df_mesures['date_mesure'] = [t for i in range(df_mesures.shape[0])]
+df_mesures.to_sql("mesures", conn, if_exists='append', index=False)
+
+# on fait la liste des annonces présentes sur leboncoin.fr, mais pas dans la base de données
 df_missing = df_resumes[~df_resumes.id.isin(ids)]
 
 # on ouvre chacune de ces annonces non connues pour enregistrer la surface et la description
 ad = 1
+df_adding = pd.DataFrame()
 for index, row in df_missing.iterrows():
     if(ad<500):
         print(" ==== annonce " + str(ad) + " ====")
 
-        ad_surface, ad_description, ad_creation = infos_annonce2("http:" + row['url']) # !!!!!!!!!!!!!!!!!!!!!!!!!!!
+        ad_surface, ad_description, ad_creation = infos_annonce("http:" + row['url']) # !!!!!!!!!!!!!!!!!!!!!!!!!!!
         #ad_surface, ad_description, ad_creation = "3", "cave de ouf", "2017-10-12" # !!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-        df_details = df_details.append({'id':row['id'], 'title':row['title'], 'price':row['price'], 'url':row['url'], 'type':row['type'], 'city':row['city'], 'surface':ad_surface, 'description':ad_description, 'date_creation':ad_creation, 'date_suppression':np.nan}, ignore_index=True)
+        df_adding = df_adding.append({'id':row['id'], 'title':row['title'], 'price':row['price'], 'url':row['url'], 'type':row['type'], 'city':row['city'], 'surface':ad_surface, 'description':ad_description, 'date_creation':ad_creation, 'date_suppression':np.nan}, ignore_index=True)
 
         time.sleep(1)
     ad = ad + 1
 
+# on ajoute les nouvelles annonces à la base de données
+df_adding.to_sql("caves", conn, if_exists='append', index=False)
+
+# on ferme la base de données
+conn.close()
+
+
 
 # ============= On cherche les annonces qui ont disparu
 # masque sur les annonces qui ont disparu par rapport à la liste de toutes les annonces
-mask_disparues = ~df_details.id.isin(df_resumes['id'].tolist())
+#mask_disparues = ~df_details.id.isin(df_resumes['id'].tolist())
 # masque sur les annonces qui n'ont pas déjà disparu
-mask_deja_disparue = pd.isnull(df_details['date_suppression'])
-mask = mask_disparues & mask_deja_disparue
-print(mask)
+#mask_deja_disparue = pd.isnull(df_details['date_suppression'])
+#mask = mask_disparues & mask_deja_disparue
+
 # pour les annonces qui viennent de disparaitre, on enregistre la date du jour
-df_details.loc[mask, 'date_suppression'] = str(datetime.date.today())
+#df_details.loc[mask, 'date_suppression'] = str(datetime.date.today())
 
 # on enregistre
-df_details.to_csv('details_caves.csv', sep=";", index=None, encoding='latin1')
+#df_details.to_csv('details_caves.csv', sep=";", index=None, encoding='latin1')
