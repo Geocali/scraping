@@ -220,3 +220,22 @@ surface : 9
 116    False
 117    False
 Length: 118, dtype: bool
+page 1
+(True, True)
+page 2
+(True, True)
+page 3
+(True, True)
+page 4
+(True, True)
+(True, False)
+page 1
+(True, True)
+Cave betonnee
+page 2
+(True, True)
+page 3
+(True, True)
+page 4
+(True, True)
+(True, False)
